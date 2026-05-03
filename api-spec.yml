@@ -1,0 +1,295 @@
+openapi: 3.1.0
+info:
+  title: Formal Agent Kernel (FAK) API
+  version: 1.0.0
+  description: |
+    Runtime validation and execution enforcement system for AI agents.
+    Ensures all agent actions are formally validated before execution.
+
+servers:
+  - url: http://localhost:8000
+    description: Local Development Server
+
+tags:
+  - name: Client
+  - name: Agent
+  - name: Validation
+  - name: Execution
+  - name: Audit
+  - name: Specification
+  - name: System
+
+paths:
+
+  /request:
+    post:
+      tags: [Client]
+      summary: Submit client request to start workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientRequest'
+      responses:
+        '200':
+          description: Final workflow response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+
+  /agent/propose:
+    post:
+      tags: [Agent]
+      summary: Agent proposes an action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionProposal'
+      responses:
+        '200':
+          description: Proposal accepted for validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalReceipt'
+
+  /validate-action:
+    post:
+      tags: [Validation]
+      summary: Validate agent action against formal constraints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionProposal'
+      responses:
+        '200':
+          description: Validation decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResponse'
+
+  /execute:
+    post:
+      tags: [Execution]
+      summary: Execute an approved action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionRequest'
+      responses:
+        '200':
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
+
+  /audit/log:
+    post:
+      tags: [Audit]
+      summary: Log validation or execution event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditEvent'
+      responses:
+        '204':
+          description: Logged successfully
+
+  /audit/{event_id}:
+    get:
+      tags: [Audit]
+      summary: Retrieve audit event by ID
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audit event found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvent'
+
+  /specs/{agent_id}:
+    get:
+      tags: [Specification]
+      summary: Retrieve agent specification
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent specification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSpecification'
+
+    put:
+      tags: [Specification]
+      summary: Create or update agent specification
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentSpecification'
+      responses:
+        '204':
+          description: Specification updated
+
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        '200':
+          description: System healthy
+
+components:
+
+  schemas:
+
+    ClientRequest:
+      type: object
+      required: [user_id, query]
+      properties:
+        user_id:
+          type: string
+        query:
+          type: string
+        context:
+          type: object
+          additionalProperties: true
+
+    WorkflowResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        result:
+          type: object
+          additionalProperties: true
+
+    ActionProposal:
+      type: object
+      required: [agent_id, motivation, goal, action]
+      properties:
+        agent_id:
+          type: string
+        motivation:
+          type: string
+        goal:
+          type: string
+        action:
+          type: string
+        parameters:
+          type: object
+          additionalProperties: true
+        context:
+          type: object
+          additionalProperties: true
+
+    ProposalReceipt:
+      type: object
+      properties:
+        proposal_id:
+          type: string
+        status:
+          type: string
+
+    ValidationResponse:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [ALLOW, DENY]
+        reason:
+          type: string
+          nullable: true
+
+    ExecutionRequest:
+      type: object
+      required: [proposal_id, action]
+      properties:
+        proposal_id:
+          type: string
+        action:
+          type: string
+        parameters:
+          type: object
+          additionalProperties: true
+
+    ExecutionResult:
+      type: object
+      properties:
+        status:
+          type: string
+        output:
+          type: object
+          additionalProperties: true
+
+    AuditEvent:
+      type: object
+      required: [event_id, type, timestamp]
+      properties:
+        event_id:
+          type: string
+        type:
+          type: string
+          enum: [validation, execution]
+        agent_id:
+          type: string
+        decision:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    AgentSpecification:
+      type: object
+      required: [motivation, allowed_goals, allowed_actions]
+      properties:
+        motivation:
+          type: string
+        allowed_goals:
+          type: array
+          items:
+            type: string
+        allowed_actions:
+          type: array
+          items:
+            type: string
+        constraints:
+          type: array
+          items:
+            type: string
