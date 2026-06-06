@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <bytecodeTargetLevel target="23">
+      <module name="Disertation" target="23" />
+      <module name="fak-backend" target="23" />
+    </bytecodeTargetLevel>
+  </component>
+</project>

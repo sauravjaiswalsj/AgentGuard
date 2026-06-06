@@ -1,0 +1,108 @@
+policyVersion: pol_2026_05_07_001
+agents:
+  reporting_agent:
+    role: database_reporter
+    allowedGoals: [generate_report, inspect_schema]
+    allowedActions: [sql.query]
+  deploy_agent:
+    role: deployment_operator
+    allowedGoals: [deploy_staging_release, deploy_production_release]
+    allowedActions: [devops.deploy, shell.command]
+constraints:
+  - id: invalid_envelope_denied
+    when:
+      validation.valid: false
+    decision: DENY
+    risk: critical
+    reason: Invalid or incomplete action envelope fails closed.
+  - id: unknown_agent_denied
+    when:
+      validation.knownAgent: false
+    decision: DENY
+    risk: critical
+    reason: Unknown agent cannot execute actions.
+  - id: disallowed_goal_denied
+    when:
+      validation.goalAllowed: false
+    decision: DENY
+    risk: high
+    reason: Agent goal is outside the declared agent specification.
+  - id: disallowed_action_denied
+    when:
+      validation.actionAllowed: false
+    decision: DENY
+    risk: high
+    reason: Operation type is outside the declared agent action space.
+  - id: reporting_goal_read_only
+    when:
+      actor.agentId: reporting_agent
+      intent.goal: generate_report
+      analysis.sql.write: true
+    decision: DENY
+    risk: critical
+    reason: Reporting goals are restricted to read-only SQL.
+  - id: destructive_sql_denied
+    when:
+      analysis.sql.destructive: true
+    decision: DENY
+    risk: critical
+    reason: Destructive SQL is blocked before execution.
+  - id: production_sql_write_requires_approval
+    when:
+      context.environment: production
+      analysis.sql.write: true
+    decision: REQUIRE_APPROVAL
+    risk: high
+    reason: Production SQL writes require human approval.
+  - id: pii_export_denied
+    when:
+      analysis.sql.containsPii: true
+      context.destination: external
+    decision: DENY
+    risk: high
+    reason: External export of sensitive customer fields is blocked.
+  - id: production_deploy_requires_approval
+    when:
+      operation.type: devops.deploy
+      context.environment: production
+      context.approvalState: none
+    decision: REQUIRE_APPROVAL
+    risk: high
+    reason: Production deployment requires approval.
+  - id: outside_change_window_requires_approval
+    when:
+      operation.type: devops.deploy
+      context.environment: production
+      context.changeWindow: false
+    decision: REQUIRE_APPROVAL
+    risk: high
+    reason: Production deployment outside a change window requires approval.
+  - id: destructive_shell_denied
+    when:
+      operation.type: shell.command
+      analysis.shell.destructive: true
+    decision: DENY
+    risk: critical
+    reason: Destructive shell command is blocked.
+policyTests:
+  - name: safe select allowed
+    envelope:
+      actor: {agentId: reporting_agent, role: database_reporter, framework: langgraph, trustLevel: internal}
+      intent: {goal: generate_report, declaredPurpose: monthly report}
+      operation: {type: sql.query, target: customers, parameters: {query: "SELECT id, name FROM customers"}}
+      context: {environment: production, userRole: analyst, approvalState: none}
+    expectDecision: ALLOW
+  - name: production delete denied
+    envelope:
+      actor: {agentId: reporting_agent, role: database_reporter, framework: langgraph, trustLevel: internal}
+      intent: {goal: generate_report, declaredPurpose: monthly report}
+      operation: {type: sql.query, target: customers, parameters: {query: "DELETE FROM customers WHERE last_login < '2022-01-01'"}}
+      context: {environment: production, userRole: analyst, approvalState: none}
+    expectDecision: DENY
+  - name: production deploy requires approval
+    envelope:
+      actor: {agentId: deploy_agent, role: deployment_operator, framework: langgraph, trustLevel: internal}
+      intent: {goal: deploy_production_release, declaredPurpose: release build}
+      operation: {type: devops.deploy, target: payments-service, parameters: {version: "1.2.0"}}
+      context: {environment: production, userRole: developer, approvalState: none, changeWindow: false}
+    expectDecision: REQUIRE_APPROVAL
