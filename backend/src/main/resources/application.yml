@@ -16,3 +16,7 @@ spring:
 
 fak:
   policy-path: classpath:configs/policies.yml
+# Logging – show constraint evaluations at DEBUG level
+logging:
+  level:
+    com.fak: DEBUG
