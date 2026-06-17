@@ -1,20 +1,20 @@
 package com.fak.core;
 
 import java.util.List;
-import java.util.Map;
 
+/**
+ * Full validation result returned to the calling agent.
+ */
 public record ValidationDecision(
-    String actionId,
     Decision decision,
-    String risk,
     String reason,
+    String risk,
     List<String> matchedConstraints,
-    String policyVersion,
     String replayHash,
-    long latencyMs,
-    Map<String, Object> facts
+    long latencyMs
 ) {
-  public boolean allowed() {
-    return decision == Decision.ALLOW;
-  }
+    public static ValidationDecision allow(String replayHash, long latencyMs) {
+        return new ValidationDecision(Decision.ALLOW, "All constraints satisfied.", "none",
+                List.of(), replayHash, latencyMs);
+    }
 }
