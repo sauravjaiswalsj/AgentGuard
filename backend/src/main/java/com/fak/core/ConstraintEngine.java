@@ -1,38 +1,59 @@
 package com.fak.core;
 
 import com.fak.config.ConstraintRule;
-import java.util.List;
-import java.util.Map;
-import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.util.*;
 
-@Service
+/**
+ * Evaluates the ordered list of policy constraints against a flat fact map.
+ * First matching DENY wins; first matching REQUIRE_APPROVAL is remembered but
+ * evaluation continues (a later DENY can still override it).
+ */
 public class ConstraintEngine {
-  public List<ConstraintRule> matching(List<ConstraintRule> constraints, Map<String, Object> facts) {
-    return constraints.stream().filter(rule -> matches(rule.when(), facts)).toList();
-  }
+    private static final Logger log = LoggerFactory.getLogger(ConstraintEngine.class);
 
-  private boolean matches(Map<String, Object> expected, Map<String, Object> facts) {
-    if (expected == null || expected.isEmpty()) {
-      return false;
-    }
-    return expected.entrySet().stream().allMatch(entry -> valueMatches(resolve(facts, entry.getKey()), entry.getValue()));
-  }
+    public record EvalResult(
+        Decision decision,
+        String reason,
+        String risk,
+        List<String> matchedConstraints
+    ) {}
 
-  private boolean valueMatches(Object actual, Object expected) {
-    if (expected instanceof List<?> list) {
-      return list.stream().anyMatch(item -> valueMatches(actual, item));
-    }
-    return String.valueOf(expected).equalsIgnoreCase(String.valueOf(actual));
-  }
+    public EvalResult evaluate(List<ConstraintRule> rules, Map<String, Object> facts) {
+        String pendingReason = null;
+        String pendingRisk   = null;
+        List<String> matched = new ArrayList<>();
 
-  private Object resolve(Map<String, Object> facts, String path) {
-    Object cursor = facts;
-    for (String part : path.split("\\.")) {
-      if (!(cursor instanceof Map<?, ?> map)) {
-        return null;
-      }
-      cursor = map.get(part);
+        for (ConstraintRule rule : rules) {
+            if (matches(rule.getWhen(), facts)) {
+                matched.add(rule.getId());
+                log.debug("Constraint matched: {} → {}", rule.getId(), rule.getDecision());
+                Decision d = Decision.valueOf(rule.getDecision());
+                if (d == Decision.DENY) {
+                    return new EvalResult(Decision.DENY, rule.getReason(), rule.getRisk(), matched);
+                }
+                if (d == Decision.REQUIRE_APPROVAL && pendingReason == null) {
+                    pendingReason = rule.getReason();
+                    pendingRisk   = rule.getRisk();
+                }
+            }
+        }
+
+        if (pendingReason != null) {
+            return new EvalResult(Decision.REQUIRE_APPROVAL, pendingReason, pendingRisk, matched);
+        }
+        return new EvalResult(Decision.ALLOW, "All constraints satisfied.", "none", matched);
     }
-    return cursor;
-  }
+
+    private boolean matches(Map<String, Object> when, Map<String, Object> facts) {
+        if (when == null) return false;
+        for (Map.Entry<String, Object> cond : when.entrySet()) {
+            Object actual = facts.get(cond.getKey());
+            if (!Objects.equals(String.valueOf(actual), String.valueOf(cond.getValue()))) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
