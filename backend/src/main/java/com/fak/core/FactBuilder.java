@@ -1,100 +1,95 @@
 package com.fak.core;
 
-import com.fak.config.AgentSpec;
-import com.fak.config.ConfigRegistry;
-import java.util.LinkedHashMap;
-import java.util.Locale;
-import java.util.Map;
-import org.springframework.stereotype.Service;
+import java.util.*;
+import java.util.regex.Pattern;
 
-@Service
+/**
+ * Extracts a flat fact map from an ActionEnvelope.
+ * Facts drive constraint evaluation in ConstraintEngine.
+ *
+ * <p>Domain-specific analyses (SQL classification, shell destructiveness) are
+ * intentionally kept here for the dissertation prototype. A production kernel
+ * would replace these with a pluggable {@code ActionAnalyzer} interface.</p>
+ */
 public class FactBuilder {
-  private final ConfigRegistry registry;
 
-  public FactBuilder(ConfigRegistry registry) {
-    this.registry = registry;
-  }
+    // SQL keywords that indicate a write operation
+    private static final Pattern SQL_WRITE = Pattern.compile(
+        "^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE|TRUNCATE|DROP|ALTER|CREATE)\b",
+        Pattern.CASE_INSENSITIVE);
 
-  public Map<String, Object> build(ActionEnvelope envelope) {
-    Map<String, Object> facts = new LinkedHashMap<>();
-    boolean valid = envelope != null
-        && envelope.actor() != null
-        && envelope.intent() != null
-        && envelope.operation() != null
-        && text(envelope.actor().agentId())
-        && text(envelope.intent().goal())
-        && text(envelope.operation().type());
-    put(facts, "validation.valid", valid);
+    // SQL keywords that destroy data irreversibly
+    private static final Pattern SQL_DESTRUCTIVE = Pattern.compile(
+        "^\s*(DELETE|TRUNCATE|DROP)\b", Pattern.CASE_INSENSITIVE);
 
-    if (!valid) {
-      put(facts, "validation.knownAgent", false);
-      return facts;
+    // Shell commands that wipe or overwrite files
+    private static final Pattern SHELL_DESTRUCTIVE = Pattern.compile(
+        "\b(rm\s+-[a-z]*f|rm\s+-rf|dd\s+if=|mkfs\b|format\b|shred\b)",
+        Pattern.CASE_INSENSITIVE);
+
+    private static final Set<String> PII_COLUMNS = Set.of(
+        "email", "phone", "ssn", "dob", "date_of_birth",
+        "credit_card", "password", "national_id");
+
+    public Map<String, Object> build(ActionEnvelope env, ValidationResult validation) {
+        Map<String, Object> f = new LinkedHashMap<>();
+
+        // ── Validation summary ──────────────────────────────
+        f.put("validation.valid",        validation.valid());
+        f.put("validation.knownAgent",   validation.knownAgent());
+        f.put("validation.goalAllowed",  validation.goalAllowed());
+        f.put("validation.actionAllowed",validation.actionAllowed());
+
+        // ── Actor ───────────────────────────────────────────
+        if (env.actor() != null) {
+            f.put("actor.agentId",    env.actor().agentId());
+            f.put("actor.role",       env.actor().role());
+            f.put("actor.trustLevel", env.actor().trustLevel());
+        }
+
+        // ── Intent ──────────────────────────────────────────
+        if (env.intent() != null) {
+            f.put("intent.goal", env.intent().goal());
+        }
+
+        // ── Operation ───────────────────────────────────────
+        if (env.operation() != null) {
+            f.put("operation.type",   env.operation().type());
+            f.put("operation.target", env.operation().target());
+            analyseSql(env.operation(), f);
+            analyseShell(env.operation(), f);
+        }
+
+        // ── Context ─────────────────────────────────────────
+        if (env.context() != null) {
+            env.context().forEach((k, v) -> f.put("context." + k, v));
+        }
+
+        return f;
     }
 
-    AgentSpec spec = registry.agent(envelope.actor().agentId());
-    put(facts, "validation.knownAgent", spec != null);
-    put(facts, "actor.agentId", envelope.actor().agentId());
-    put(facts, "actor.role", envelope.actor().role());
-    put(facts, "intent.goal", envelope.intent().goal());
-    put(facts, "operation.type", envelope.operation().type());
-    put(facts, "operation.target", envelope.operation().target());
-    (envelope.context() == null ? Map.<String, Object>of() : envelope.context())
-        .forEach((key, value) -> put(facts, "context." + key, value));
-
-    if (spec != null) {
-      put(facts, "validation.goalAllowed", spec.allowedGoals().contains(envelope.intent().goal()));
-      put(facts, "validation.actionAllowed", spec.allowedActions().contains(envelope.operation().type()));
+    private void analyseSql(Operation op, Map<String, Object> f) {
+        if (!"sql.query".equals(op.type())) return;
+        String q = param(op, "query");
+        if (q == null) return;
+        boolean write       = SQL_WRITE.matcher(q).find();
+        boolean destructive = SQL_DESTRUCTIVE.matcher(q).find();
+        boolean pii         = PII_COLUMNS.stream().anyMatch(c -> q.toLowerCase().contains(c));
+        f.put("analysis.sql.write",       write);
+        f.put("analysis.sql.destructive", destructive);
+        f.put("analysis.sql.containsPii", pii);
     }
 
-    analyzeSql(envelope, facts);
-    analyzeShell(envelope, facts);
-    return facts;
-  }
-
-  private void analyzeSql(ActionEnvelope envelope, Map<String, Object> facts) {
-    if (!"sql.query".equals(envelope.operation().type())) {
-      return;
+    private void analyseShell(Operation op, Map<String, Object> f) {
+        if (!"shell.command".equals(op.type())) return;
+        String cmd = param(op, "command");
+        if (cmd == null) return;
+        f.put("analysis.shell.destructive", SHELL_DESTRUCTIVE.matcher(cmd).find());
     }
-    String query = String.valueOf(envelope.operation().parameters().getOrDefault("query", ""));
-    String normalized = query.strip().replaceAll("\\s+", " ").toUpperCase(Locale.ROOT);
-    String operation = normalized.isBlank() ? "UNKNOWN" : normalized.split(" ")[0];
-    boolean write = operation.matches("INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE");
-    boolean destructive = operation.matches("DROP|TRUNCATE|DELETE");
-    boolean containsPii = normalized.matches(".*\\b(EMAIL|PHONE|NATIONAL_INSURANCE_NUMBER|SSN)\\b.*");
-    put(facts, "analysis.sql.operation", operation);
-    put(facts, "analysis.sql.write", write);
-    put(facts, "analysis.sql.destructive", destructive);
-    put(facts, "analysis.sql.containsPii", containsPii);
-  }
 
-  private void analyzeShell(ActionEnvelope envelope, Map<String, Object> facts) {
-    if (!"shell.command".equals(envelope.operation().type()) && !"devops.deploy".equals(envelope.operation().type())) {
-      return;
+    private String param(Operation op, String key) {
+        if (op.parameters() == null) return null;
+        Object v = op.parameters().get(key);
+        return v == null ? null : v.toString();
     }
-    String command = String.valueOf(envelope.operation().parameters().getOrDefault("command", ""));
-    String lower = command.toLowerCase(Locale.ROOT);
-    boolean destructive = lower.contains("rm -rf")
-        || lower.contains("kubectl delete")
-        || lower.contains("terraform destroy")
-        || lower.contains("drop database");
-    put(facts, "analysis.shell.destructive", destructive);
-  }
-
-  private static boolean text(String value) {
-    return value != null && !value.isBlank();
-  }
-
-  public static void put(Map<String, Object> root, String path, Object value) {
-    String[] parts = path.split("\\.");
-    Map<String, Object> cursor = root;
-    for (int i = 0; i < parts.length - 1; i++) {
-      Object next = cursor.computeIfAbsent(parts[i], ignored -> new LinkedHashMap<String, Object>());
-      if (next instanceof Map<?, ?> nextMap) {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> typed = (Map<String, Object>) nextMap;
-        cursor = typed;
-      }
-    }
-    cursor.put(parts[parts.length - 1], value);
-  }
 }
