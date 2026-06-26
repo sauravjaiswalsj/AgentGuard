@@ -1,67 +1,61 @@
 package com.fak.core;
 
-import com.fak.audit.AuditService;
 import com.fak.config.ConfigRegistry;
-import com.fak.config.ConstraintRule;
-import com.fak.metrics.MetricsService;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import com.fak.config.PolicyConfig;
 import org.springframework.stereotype.Service;
+import java.util.Map;
 
+/**
+ * Orchestrates the full FAK validation pipeline:
+ *   1. Pre-flight check (known agent, allowed goal, allowed action)
+ *   2. Fact extraction via FactBuilder
+ *   3. Constraint evaluation via ConstraintEngine
+ *   4. Replay hash via ReplayHasher
+ */
 @Service
 public class ValidationService {
-  private final ConfigRegistry registry;
-  private final FactBuilder factBuilder;
-  private final ConstraintEngine constraintEngine;
-  private final ReplayHasher hasher;
-  private final AuditService auditService;
-  private final MetricsService metrics;
 
-  public ValidationService(ConfigRegistry registry, FactBuilder factBuilder, ConstraintEngine constraintEngine,
-      ReplayHasher hasher, AuditService auditService, MetricsService metrics) {
-    this.registry = registry;
-    this.factBuilder = factBuilder;
-    this.constraintEngine = constraintEngine;
-    this.hasher = hasher;
-    this.auditService = auditService;
-    this.metrics = metrics;
-  }
+    private final ConfigRegistry registry;
+    private final FactBuilder     factBuilder;
+    private final ConstraintEngine engine;
 
-  public ValidationDecision validate(ActionEnvelope envelope) {
-    long start = System.nanoTime();
-    String actionId = "act_" + UUID.randomUUID();
-    String policyVersion = envelope != null && envelope.policyVersion() != null
-        ? envelope.policyVersion()
-        : registry.current().policyVersion();
-    Map<String, Object> facts = factBuilder.build(envelope);
-    List<ConstraintRule> matches = new ArrayList<>(constraintEngine.matching(registry.current().constraints(), facts));
-    Decision decision = matches.stream().map(ConstraintRule::decision).reduce(Decision.ALLOW, Decision::max);
-    String risk = matches.stream()
-        .max(Comparator.comparing(rule -> rule.decision().precedence()))
-        .map(ConstraintRule::risk)
-        .orElse("low");
-    String reason = matches.isEmpty()
-        ? "No blocking constraints matched; action is allowed."
-        : matches.stream().max(Comparator.comparing(rule -> rule.decision().precedence())).map(ConstraintRule::reason).orElse("");
-    String hash = hasher.hash(envelope, decision, policyVersion);
-    long latencyMs = Math.max(1, (System.nanoTime() - start) / 1_000_000);
-    ValidationDecision result = new ValidationDecision(
-        actionId,
-        decision,
-        risk,
-        reason,
-        matches.stream().map(ConstraintRule::id).toList(),
-        policyVersion,
-        hash,
-        latencyMs,
-        facts);
-    if (auditService != null) {
-      auditService.recordValidation(envelope, result);
+    public ValidationService(ConfigRegistry registry) {
+        this.registry    = registry;
+        this.factBuilder = new FactBuilder();
+        this.engine      = new ConstraintEngine();
     }
-    metrics.record(result);
-    return result;
-  }
+
+    public ValidationDecision validate(ActionEnvelope envelope) {
+        long start = System.currentTimeMillis();
+        PolicyConfig policy = registry.getConfig();
+
+        // Step 1 — structural pre-flight
+        ValidationResult pre = preflight(envelope, policy);
+
+        // Step 2 — build flat fact map
+        Map<String, Object> facts = factBuilder.build(envelope, pre);
+
+        // Step 3 — evaluate constraints
+        ConstraintEngine.EvalResult result = engine.evaluate(policy.getConstraints(), facts);
+
+        // Step 4 — hash envelope for replay
+        String hash = ReplayHasher.hash(envelope);
+
+        long latency = System.currentTimeMillis() - start;
+        return new ValidationDecision(
+            result.decision(), result.reason(), result.risk(),
+            result.matchedConstraints(), hash, latency
+        );
+    }
+
+    private ValidationResult preflight(ActionEnvelope env, PolicyConfig policy) {
+        if (env == null || env.actor() == null || env.intent() == null || env.operation() == null) {
+            return ValidationResult.invalid();
+        }
+        var spec = policy.getAgents().get(env.actor().agentId());
+        boolean knownAgent   = spec != null;
+        boolean goalAllowed  = knownAgent && spec.getAllowedGoals().contains(env.intent().goal());
+        boolean actionAllowed= knownAgent && spec.getAllowedActions().contains(env.operation().type());
+        return new ValidationResult(true, knownAgent, goalAllowed, actionAllowed);
+    }
 }
