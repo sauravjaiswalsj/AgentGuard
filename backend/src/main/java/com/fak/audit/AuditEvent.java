@@ -1,38 +1,59 @@
 package com.fak.audit;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
+import com.fak.core.Decision;
+import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.List;
 
+/**
+ * Persisted record of every FAK validation decision.
+ * Enables post-hoc audit, replay, and analytics.
+ */
 @Entity
+@Table(name = "audit_events")
 public class AuditEvent {
-  @Id
-  private String id;
-  private Instant createdAt;
-  private String eventType;
-  private String decision;
-  private String policyVersion;
-  private String replayHash;
-  @Lob
-  private String envelopeJson;
-  @Lob
-  private String decisionJson;
 
-  public String getId() { return id; }
-  public void setId(String id) { this.id = id; }
-  public Instant getCreatedAt() { return createdAt; }
-  public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
-  public String getEventType() { return eventType; }
-  public void setEventType(String eventType) { this.eventType = eventType; }
-  public String getDecision() { return decision; }
-  public void setDecision(String decision) { this.decision = decision; }
-  public String getPolicyVersion() { return policyVersion; }
-  public void setPolicyVersion(String policyVersion) { this.policyVersion = policyVersion; }
-  public String getReplayHash() { return replayHash; }
-  public void setReplayHash(String replayHash) { this.replayHash = replayHash; }
-  public String getEnvelopeJson() { return envelopeJson; }
-  public void setEnvelopeJson(String envelopeJson) { this.envelopeJson = envelopeJson; }
-  public String getDecisionJson() { return decisionJson; }
-  public void setDecisionJson(String decisionJson) { this.decisionJson = decisionJson; }
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String      agentId;
+    private String      goal;
+    private String      operationType;
+
+    @Enumerated(EnumType.STRING)
+    private Decision    decision;
+
+    private String      reason;
+    private String      risk;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    private List<String> matchedConstraints;
+
+    private String      replayHash;
+    private long        latencyMs;
+    private Instant     createdAt = Instant.now();
+
+    // Constructors, getters, setters
+    public AuditEvent() {}
+
+    public AuditEvent(String agentId, String goal, String operationType,
+                      Decision decision, String reason, String risk,
+                      List<String> matchedConstraints, String replayHash, long latencyMs) {
+        this.agentId            = agentId;
+        this.goal               = goal;
+        this.operationType      = operationType;
+        this.decision           = decision;
+        this.reason             = reason;
+        this.risk               = risk;
+        this.matchedConstraints = matchedConstraints;
+        this.replayHash         = replayHash;
+        this.latencyMs          = latencyMs;
+    }
+
+    public Long getId()                   { return id; }
+    public String getAgentId()            { return agentId; }
+    public Decision getDecision()         { return decision; }
+    public String getReplayHash()         { return replayHash; }
+    public long getLatencyMs()            { return latencyMs; }
+    public Instant getCreatedAt()         { return createdAt; }
 }
