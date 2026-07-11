@@ -1,58 +1,86 @@
-from fak_client import validate
+"""
+FAK-protected tools for the LangGraph deploy agent.
 
-# Captures FAK decisions during a single agent run
+Each tool function:
+  1. Builds an ActionEnvelope describing the action.
+  2. Calls the FAK kernel via fak_client.validate().
+  3. Returns early if the decision is DENY or REQUIRE_APPROVAL.
+  4. Only executes the real action on ALLOW.
+
+FAK decisions from this session are stored in _session_decisions
+so the FastAPI bridge can expose them to the frontend.
+"""
+import time
+from fak_client import ActionEnvelope, Actor, Intent, Operation, validate
+
+_ACTOR = Actor(agentId="deploy_agent", role="deployment_operator")
 _session_decisions: list[dict] = []
 
-def clear_decisions() -> None:
+
+def clear_decisions():
     _session_decisions.clear()
+
 
 def get_decisions() -> list[dict]:
     return list(_session_decisions)
 
 
+def _record(tool: str, decision: dict):
+    _session_decisions.append({"tool": tool, **decision})
+
+
 def deploy_to_cloud(service: str, version: str, environment: str) -> str:
-    goal = "deploy_production_release" if environment == "production" else "deploy_staging_release"
-    envelope = {
-        "actor": {"agentId": "deploy_agent", "framework": "langgraph",
-                  "role": "deployment_operator", "trustLevel": "internal"},
-        "intent": {"goal": goal, "declaredPurpose": f"Deploy {service} version {version} to {environment}"},
-        "operation": {"type": "devops.deploy", "target": service, "parameters": {"version": version}},
-        "context": {"environment": environment, "approvalState": "none",
-                    "changeWindow": False, "userRole": "developer"}
-    }
-    decision = validate(envelope)
-    _session_decisions.append({
-        "tool": "deploy_to_cloud",
-        "args": {"service": service, "version": version, "environment": environment},
-        **decision
-    })
-    d = decision.get("decision", "UNKNOWN")
-    reason = decision.get("reason", "")
-    if d == "ALLOW":
-        return f"[SIMULATED] Successfully deployed {service} v{version} to {environment}. FAK: ALLOW."
-    elif d == "REQUIRE_APPROVAL":
-        return f"Deployment blocked pending approval. FAK: REQUIRE_APPROVAL. Reason: {reason}"
-    else:
-        return f"Deployment denied by FAK. Decision: {d}. Reason: {reason}"
+    t0 = time.monotonic()
+    goal = ("deploy_production_release"
+            if environment == "production" else "deploy_staging_release")
+
+    envelope = ActionEnvelope(
+        actor=_ACTOR,
+        intent=Intent(goal=goal, declaredPurpose=f"deploy {service} {version}"),
+        operation=Operation(
+            type="devops.deploy",
+            target=service,
+            parameters={"version": version},
+        ),
+        context={
+            "environment": environment,
+            "approvalState": "none",
+            "changeWindow": False,
+        },
+    )
+
+    result = validate(envelope)
+    result["latencyMs"] = int((time.monotonic() - t0) * 1000)
+    _record("deploy_to_cloud", result)
+
+    decision = result.get("decision", "DENY")
+    if decision == "ALLOW":
+        return f"✅ Deployed {service} v{version} to {environment}."
+    if decision == "REQUIRE_APPROVAL":
+        return f"⏳ Deployment requires human approval. Reason: {result.get('reason')}"
+    return f"🚫 Deploy blocked by FAK. Reason: {result.get('reason')}"
 
 
 def run_shell_command(command: str) -> str:
-    envelope = {
-        "actor": {"agentId": "deploy_agent", "framework": "langgraph",
-                  "role": "deployment_operator", "trustLevel": "internal"},
-        "intent": {"goal": "deploy_staging_release", "declaredPurpose": f"Run shell command: {command}"},
-        "operation": {"type": "shell.command", "target": "host", "parameters": {"command": command}},
-        "context": {"environment": "production", "approvalState": "none", "userRole": "developer"}
-    }
-    decision = validate(envelope)
-    _session_decisions.append({
-        "tool": "run_shell_command",
-        "args": {"command": command},
-        **decision
-    })
-    d = decision.get("decision", "UNKNOWN")
-    reason = decision.get("reason", "")
-    if d == "ALLOW":
-        return f"[SIMULATED] Command executed: {command}. FAK: ALLOW."
-    else:
-        return f"Command blocked by FAK. Decision: {d}. Reason: {reason}"
+    t0 = time.monotonic()
+    envelope = ActionEnvelope(
+        actor=_ACTOR,
+        intent=Intent(goal="deploy_staging_release", declaredPurpose="maintenance"),
+        operation=Operation(
+            type="shell.command",
+            target="host",
+            parameters={"command": command},
+        ),
+        context={"environment": "production"},
+    )
+
+    result = validate(envelope)
+    result["latencyMs"] = int((time.monotonic() - t0) * 1000)
+    _record("run_shell_command", result)
+
+    decision = result.get("decision", "DENY")
+    if decision == "ALLOW":
+        return f"✅ Command executed: {command}"
+    if decision == "REQUIRE_APPROVAL":
+        return f"⏳ Command requires approval. Reason: {result.get('reason')}"
+    return f"🚫 Command blocked by FAK. Reason: {result.get('reason')}"
