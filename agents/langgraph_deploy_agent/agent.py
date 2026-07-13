@@ -44,7 +44,6 @@ def run(user_prompt: str) -> dict:
     for msg in messages:
         msg_type = type(msg).__name__
 
-        # Agent decided to call a tool
         if msg_type == "AIMessage":
             tool_calls = getattr(msg, "tool_calls", None) or []
             for tc in tool_calls:
@@ -56,9 +55,7 @@ def run(user_prompt: str) -> dict:
                     "result": None,
                 })
 
-        # Tool returned a result — pair it with the pending tool_call step
         elif msg_type == "ToolMessage":
-            # Find the matching pending tool_call by tool_call_id
             tool_call_id = getattr(msg, "tool_call_id", None)
             matched = False
             if tool_call_id:
@@ -67,7 +64,6 @@ def run(user_prompt: str) -> dict:
                         step["result"] = msg.content
                         matched = True
                         break
-            # Fallback: attach to latest unresolved step
             if not matched:
                 for step in reversed(steps):
                     if step["result"] is None:
