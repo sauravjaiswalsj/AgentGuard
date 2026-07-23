@@ -1,22 +1,23 @@
-#!/usr/bin/env python3
-import json
-import urllib.request
+"""SQL Reporting Agent demo — exercises FAK SQL constraints."""
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "langgraph_deploy_agent"))
+from fak_client import ActionEnvelope, Actor, Intent, Operation, validate
 
-API = "http://localhost:8080/api/v1/validate"
+ACTOR = Actor(agentId="reporting_agent", role="database_reporter")
 
-
-def validate(query: str):
-    payload = {
-        "actor": {"agentId": "reporting_agent", "framework": "python-demo", "role": "database_reporter", "trustLevel": "internal"},
-        "intent": {"goal": "generate_report", "declaredPurpose": "Generate a customer report"},
-        "operation": {"type": "sql.query", "target": "customers", "parameters": {"query": query}},
-        "context": {"environment": "production", "userRole": "analyst", "approvalState": "none"},
-    }
-    request = urllib.request.Request(API, data=json.dumps(payload).encode(), headers={"content-type": "application/json"})
-    with urllib.request.urlopen(request) as response:
-        print(json.dumps(json.loads(response.read()), indent=2))
-
+def check(label, query, context=None):
+    env = ActionEnvelope(actor=ACTOR,
+        intent=Intent(goal="generate_report", declaredPurpose="monthly report"),
+        operation=Operation(type="sql.query", target="customers", parameters={"query": query}),
+        context=context or {"environment": "production", "approvalState": "none"})
+    r = validate(env)
+    icon = {"ALLOW":"✅","DENY":"🚫","REQUIRE_APPROVAL":"⏳"}.get(r["decision"],"?")
+    print(f"{icon} [{r['decision']}] {label}\n   {r['reason']} ({r['latencyMs']}ms)\n")
 
 if __name__ == "__main__":
-    validate("SELECT id, name FROM customers")
-    validate("DELETE FROM customers WHERE last_login < '2022-01-01'")
+    check("Safe SELECT", "SELECT id, name FROM customers LIMIT 100")
+    check("PII export", "SELECT id, email, phone FROM customers",
+          {"environment":"production","destination":"external"})
+    check("DELETE old records", "DELETE FROM customers WHERE last_login < '2022-01-01'")
+    check("INSERT production write", "INSERT INTO audit_log(event) VALUES ('login')",
+          {"environment":"production","approvalState":"none"})
