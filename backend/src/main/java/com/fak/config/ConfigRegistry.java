@@ -36,3 +36,5 @@ public class ConfigRegistry {
         this.config = newConfig;
     }
 }
+
+// hot-reload supported since pol_2026_07_27
