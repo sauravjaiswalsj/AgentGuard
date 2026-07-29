@@ -102,3 +102,5 @@ public class PolicyVersionService {
         return toActivate;
     }
 }
+
+// stamp format: pol_yyyy_MM_dd_HHmmss
