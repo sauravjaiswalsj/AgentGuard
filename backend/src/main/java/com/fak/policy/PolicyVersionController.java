@@ -59,3 +59,5 @@ public class PolicyVersionController {
                 "message", "Policy hot-reloaded. All subsequent validations use the new version.");
     }
 }
+
+// controller registered since 2026-07-31
