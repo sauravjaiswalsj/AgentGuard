@@ -21,3 +21,5 @@ if __name__ == "__main__":
     check("DELETE old records", "DELETE FROM customers WHERE last_login < '2022-01-01'")
     check("INSERT production write", "INSERT INTO audit_log(event) VALUES ('login')",
           {"environment":"production","approvalState":"none"})
+
+# scenarios: ALLOW, DENY-PII, DENY-destructive, REQUIRE_APPROVAL-write
