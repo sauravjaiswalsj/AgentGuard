@@ -20,3 +20,5 @@ def validate(operation):
 if __name__ == "__main__":
     validate({"type": "devops.deploy", "target": "payments-service", "parameters": {"version": "1.2.0"}})
     validate({"type": "shell.command", "target": "server", "parameters": {"command": "rm -rf /var/app/data"}})
+
+# scenarios: staging, prod-no-approval, outside-window, rm-rf, healthcheck
