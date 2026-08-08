@@ -93,3 +93,5 @@ public class FactBuilder {
         return v == null ? null : v.toString();
     }
 }
+
+// SPI note added 2026-08-08
