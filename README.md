@@ -1,56 +1,17 @@
-# Formal Agent Kernel Prototype
+# FAK — Formal Agent Kernel
 
-FAK is implemented as a modular monolith matching the dissertation architecture: API layer, guardrails, router, multi-agent manager, FAK core, execution simulation, configuration registry, audit log, replay, and metrics.
+Runtime policy enforcement for AI agents.
+University of Warwick MSc Dissertation 2026 — Saurav Jaiswal
 
-## Run Backend
+## Stack
 
-```bash
-cd backend
-mvn spring-boot:run
-```
+- Kernel: Spring Boot 3, JPA, H2
+- Agent: LangGraph + Groq
+- Bridge: FastAPI
+- UI: Next.js 14
 
-The backend starts on `http://localhost:8080` and uses H2 by default. To use PostgreSQL, start Docker Compose and set:
+## Quick start
 
-```bash
-export FAK_DB_URL=jdbc:postgresql://localhost:5432/fak
-export FAK_DB_USER=fak
-export FAK_DB_PASSWORD=fak
-```
-
-## Run Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:3000`.
-
-## Verify
-
-```bash
-cd backend
-mvn test
-```
-
-## Demo Agents
-
-```bash
-python3 agents/sql_agent_demo.py
-python3 agents/devops_agent_demo.py
-```
-
-# Terminal 1 — FAK backend (Spring Boot)
-cd Documents/Warwick/Disertation/backend
-mvn spring-boot:run
-
-# Terminal 2 — Agent API bridge (FastAPI)
-cd Documents/Warwick/Disertation/agents
-source venv/bin/activate
-pip install fastapi uvicorn   # if not already installed
-uvicorn api:app --reload --port 8000
-
-# Terminal 3 — Next.js frontend
-cd Documents/Warwick/Disertation/frontend
-npm run dev
+    cd backend  && ./mvnw spring-boot:run
+    cd agents   && uvicorn api:app --reload
+    cd frontend && npm run dev
