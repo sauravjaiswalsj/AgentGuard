@@ -5,3 +5,4 @@ frontend/.next/
 frontend/out/
 *.log
 .DS_Store
+benchmark_results/
