@@ -4,5 +4,8 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 *.log
+*.env
+**/*.env
+agents/*.env
 .DS_Store
 benchmark_results/

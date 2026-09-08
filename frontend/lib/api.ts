@@ -53,3 +53,14 @@ export async function createDraftVersion(payload: {
   if (!r.ok) throw new Error(`Failed to create draft: ${r.status}`);
   return r.json();
 }
+
+/**
+ * Generic fetch helper used by page.tsx.
+ * Prepends the FAK base URL + /api/v1 to the given path.
+ */
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: HeadersInit = { "content-type": "application/json", ...(init?.headers ?? {}) };
+  const r = await fetch(`${BASE}/api/v1${path}`, { ...init, headers });
+  if (!r.ok) throw new Error(`FAK API error ${r.status}: ${path}`);
+  return r.json() as Promise<T>;
+}

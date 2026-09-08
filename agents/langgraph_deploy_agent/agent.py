@@ -1,7 +1,9 @@
 # pyrefly: ignore [missing-import]
 import os
+from dotenv import load_dotenv
+load_dotenv()
 # pyrefly: ignore [missing-import]
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 # pyrefly: ignore [missing-import]
 from langchain_core.tools import tool
 # pyrefly: ignore [missing-import]
@@ -21,9 +23,9 @@ def shell_tool(command: str) -> str:
     """Run a shell command on the host. Always calls FAK validation before executing."""
     return run_shell_command(command)
 
-llm = ChatGroq(
-    model="qwen/qwen3.6-27b",
-    api_key=os.environ["GROQ_API_KEY"]
+llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    api_key=os.environ["OPENAI_API_KEY"]
 )
 tools = [deploy_tool, shell_tool]
 graph = create_react_agent(
